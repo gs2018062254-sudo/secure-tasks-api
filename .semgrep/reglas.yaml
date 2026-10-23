@@ -1,0 +1,43 @@
+# Reglas propias de Semgrep para SecureTasks API.
+#
+# Los conjuntos de reglas publicos (p/default, p/owasp-top-ten, p/secrets) NO
+# detectaron el sumidero DOM XSS del panel web, porque su patron no coincide con
+# la interpolacion de un template literal. Estas reglas cubren ese hueco.
+#
+# Uso: semgrep scan --config=.semgrep/reglas.yaml
+
+rules:
+  - id: sec-tasks-dom-xss-innerhtml
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Asignacion de HTML construido por interpolacion a innerHTML/outerHTML.
+      Si el valor proviene del usuario o de una API, permite XSS
+      (CWE-79). Construye nodos con createElement/textContent o sanea el HTML.
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+      cwe: "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: $EL.innerHTML = $X
+          - pattern: $EL.outerHTML = $X
+          - pattern: $EL.insertAdjacentHTML($POS, $X)
+          - pattern: |
+              $EL.innerHTML = `...${$X}...`
+      - pattern-not: $EL.innerHTML = "..."
+
+  - id: sec-tasks-eval-dinamico
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Uso de eval o new Function con contenido dinamico, lo que permite
+      ejecucion de codigo arbitrario si la entrada es controlable (CWE-95).
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+      cwe: "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code ('Eval Injection')"
+    pattern-either:
+      - pattern: eval($X)
+      - pattern: new Function(...)
