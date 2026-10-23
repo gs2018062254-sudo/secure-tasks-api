@@ -30,28 +30,39 @@ async function cargarTareas() {
   pintarTareas();
 }
 
-// Punto de partida del ejercicio: el contenido de la API se inserta
-// directamente como HTML sin escapar.
+// v1.1.0: la salida se construye con nodos del DOM y textContent, de modo que
+// el contenido de la API nunca se interpreta como HTML. Esto elimina el
+// sumidero de XSS almacenado (CWE-79) que arrastraba la v1.0.0.
+function crearElemento(etiqueta, clase, texto) {
+  const nodo = document.createElement(etiqueta);
+
+  if (clase) {
+    nodo.className = clase;
+  }
+
+  nodo.textContent = texto;
+  return nodo;
+}
+
 function pintarTareas() {
   const termino = campoFiltro.value.trim().toLowerCase();
   const visibles = termino
     ? tareas.filter((t) => t.title.toLowerCase().includes(termino))
     : tareas;
 
-  if (visibles.length === 0) {
-    lista.innerHTML = '<li class="vacio">No hay tareas para mostrar.</li>';
-  } else {
-    lista.innerHTML = visibles
-      .map(
-        (t) => `<li class="tarea">
-          <strong>${t.title}</strong>
-          <span class="insignia ${t.priority}">${t.priority}</span>
-          <p>${t.description || 'Sin descripcion'}</p>
-        </li>`
-      )
-      .join('');
-  }
+  const nodos = visibles.length === 0
+    ? [crearElemento('li', 'vacio', 'No hay tareas para mostrar.')]
+    : visibles.map((t) => {
+        const item = crearElemento('li', 'tarea', '');
+        item.append(
+          crearElemento('strong', '', t.title),
+          crearElemento('span', 'insignia', t.priority),
+          crearElemento('p', '', t.description || 'Sin descripcion')
+        );
+        return item;
+      });
 
+  lista.replaceChildren(...nodos);
   contador.textContent = `${visibles.length} de ${tareas.length} tarea(s)`;
 }
 

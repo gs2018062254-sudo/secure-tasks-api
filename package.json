@@ -1,6 +1,6 @@
 {
   "name": "secure-tasks-api",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "API REST de gestion de tareas con panel web, usada como caso de estudio para el escaneo automatizado de vulnerabilidades (SAST, SCA, SBOM y deteccion de secretos) dentro de un pipeline de CI/CD.",
   "license": "MIT",
@@ -15,12 +15,12 @@
     "test": "node --test"
   },
   "dependencies": {
-    "axios": "0.21.1",
+    "axios": "^1.20.0",
     "cors": "2.8.5",
-    "express": "4.17.1",
+    "express": "^4.22.3",
     "express-rate-limit": "7.4.1",
     "helmet": "8.0.0",
-    "lodash": "4.17.20"
+    "lodash": "^4.18.1"
   },
   "devDependencies": {
     "supertest": "7.0.0"
