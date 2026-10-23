@@ -1,5 +1,7 @@
 # SecureTasks API
 
+[![Escaneo de vulnerabilidades](https://github.com/gs2018062254-sudo/secure-tasks-api/actions/workflows/security-scan.yml/badge.svg)](https://github.com/gs2018062254-sudo/secure-tasks-api/actions/workflows/security-scan.yml)
+
 API REST de gestión de tareas con panel web, utilizada como **caso de estudio para el
 escaneo automatizado de vulnerabilidades** dentro de un pipeline de CI/CD.
 
@@ -10,6 +12,10 @@ herramientas de análisis de seguridad en un flujo de integración y despliegue 
 - **Aplicación desplegada:** _pendiente: reemplazar por la URL pública de Vercel_
 - **Video de la construcción:** _pendiente: reemplazar por la URL del video en YouTube / TikTok_
 - **Artículo publicado:** _pendiente: reemplazar por la URL del artículo en Dev.to / Medium / HashNode_
+
+> **Ciclo rojo → verde.** El commit `8848f20` (`v1.0.0`) deja el pipeline **en rojo** con
+> hallazgos reales; el commit `7b9b6c1` (`v1.1.0`) los corrige y lo deja **en verde**, sin
+> desactivar ninguna regla ni usar `continue-on-error`.
 
 ---
 
@@ -66,7 +72,7 @@ El workflow [security-scan.yml](.github/workflows/security-scan.yml) se ejecuta 
 | # | Etapa | Herramienta | Qué busca |
 |---|---|---|---|
 | 1 | Secretos | **Gitleaks** | Credenciales, tokens y claves en todo el historial de Git |
-| 2 | SAST | **Semgrep** | Patrones inseguros en el código propio (`p/default`, `p/owasp-top-ten`, `p/secrets`) |
+| 2 | SAST | **Semgrep** | Patrones inseguros en el código propio (`p/default`, `p/owasp-top-ten`, `p/secrets` + reglas propias) |
 | 3 | SCA + IaC | **Trivy** | CVE en dependencias, misconfiguraciones y secretos en el sistema de archivos |
 | 4 | SBOM + SCA | **Syft** + **Grype** | Inventario CycloneDX de componentes y CVE detectadas sobre ese inventario |
 | 5 | Pruebas | `node:test` | Regresión funcional antes de desplegar |
@@ -75,6 +81,34 @@ El workflow [security-scan.yml](.github/workflows/security-scan.yml) se ejecuta 
 Todas estas herramientas son **distintas** de las que se usan habitualmente en los
 laboratorios de la asignatura (ZAP, Burp Suite, Nikto, Nessus, OpenVAS, Nuclei, Wapiti),
 que corresponden a la categoría DAST y que no se emplean en este repositorio.
+
+### Reglas propias de Semgrep
+
+Los conjuntos públicos (`p/default`, `p/owasp-top-ten`, `p/secrets`) **no detectaron** el
+sumidero DOM XSS del panel web, porque el valor llega interpolado dentro de un template
+literal construido con `.map().join('')`. Por eso el repositorio añade
+[`.semgrep/reglas.yaml`](.semgrep/reglas.yaml) con reglas propias de severidad `ERROR`:
+
+| Regla | Qué detecta | CWE |
+|---|---|---|
+| `sec-tasks-dom-xss-innerhtml` | Asignación de HTML interpolado a `innerHTML` / `outerHTML` / `insertAdjacentHTML` | CWE-79 |
+| `sec-tasks-eval-dinamico` | `eval()` y `new Function()` con contenido dinámico | CWE-95 |
+
+Además, la compuerta del pipeline solo bloquea con `--severity=ERROR --error`, de modo que
+los avisos de los conjuntos públicos (por ejemplo, acciones de GitHub sin fijar a un SHA) se
+publican como alertas pero **no** detienen el despliegue.
+
+### Resultados reales (v1.0.0 → v1.1.0)
+
+| Escáner | v1.0.0 | v1.1.0 |
+|---|---|---|
+| Trivy (`vuln,misconfig,secret`) | **36** (18 HIGH / 18 MEDIUM) | **0** |
+| `npm audit` | **9** (6 high / 3 low) | **0** |
+| Semgrep (`sec-tasks-dom-xss-innerhtml`) | **1 ERROR** | **0** |
+| Syft (SBOM) | CycloneDX 1.7, **65 componentes** | — |
+| Grype sobre el SBOM | **43** (18 High / 18 Medium / 7 Low) | — |
+| Gitleaks | **0** fugas | **0** |
+| Pruebas `node:test` | 9/9 | **9/9** |
 
 ### Por qué falla el pipeline en la primera ejecución
 
@@ -97,7 +131,8 @@ El despliegue automático usa tres secretos del repositorio:
 | `VERCEL_PROJECT_ID` | Archivo `.vercel/project.json` tras ejecutar `vercel link` |
 
 Alternativa sin secretos: importar el repositorio desde el panel de Vercel
-(*Add New → Project*) y eliminar el job `desplegar-vercel` del workflow.
+(*Add New → Project*). En ese caso el job `desplegar-vercel` detecta que faltan los secretos
+y se **omite con un aviso**, sin marcar el pipeline en rojo.
 
 ---
 
@@ -107,6 +142,7 @@ Alternativa sin secretos: importar el repositorio desde el panel de Vercel
 secure-tasks-api/
 ├── .github/workflows/security-scan.yml   Pipeline de escaneo y despliegue
 ├── .gitleaks.toml                        Reglas del escáner de secretos
+├── .semgrep/reglas.yaml                  Reglas SAST propias (DOM XSS, eval)
 ├── api/index.js                          Entrada serverless para Vercel
 ├── public/                               Panel web (HTML/CSS/JS)
 ├── src/
