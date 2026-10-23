@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SecureTasks | Panel de tareas</title>
+    <meta name="description" content="Panel web de SecureTasks API: caso de estudio de escaneo automatizado de vulnerabilidades en CI/CD." />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="contenedor">
+      <header class="encabezado">
+        <div>
+          <h1>SecureTasks</h1>
+          <p class="subtitulo">Panel de tareas &middot; caso de estudio de escaneo de vulnerabilidades</p>
+        </div>
+        <span id="estado-api" class="estado">conectando&hellip;</span>
+      </header>
+
+      <section class="tarjeta">
+        <form id="formulario" autocomplete="off">
+          <input id="titulo" name="title" type="text" placeholder="Titulo de la tarea" maxlength="120" required />
+          <select id="prioridad" name="priority">
+            <option value="baja">Baja</option>
+            <option value="media" selected>Media</option>
+            <option value="alta">Alta</option>
+          </select>
+          <button type="submit">Agregar</button>
+        </form>
+      </section>
+
+      <section class="tarjeta">
+        <div class="barra">
+          <input id="filtro" type="search" placeholder="Filtrar por titulo&hellip;" />
+          <span id="contador" class="contador">0 tareas</span>
+        </div>
+        <ul id="lista" class="lista"></ul>
+      </section>
+
+      <footer class="pie">
+        <span id="detalle-api">&nbsp;</span>
+      </footer>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

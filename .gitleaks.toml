@@ -1,0 +1,15 @@
+# Configuracion de Gitleaks para el escaneo de secretos.
+# Referencia de reglas: https://github.com/gitleaks/gitleaks
+
+title = "SecureTasks - escaneo de secretos"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Rutas y valores que no deben reportarse como fuga de credenciales"
+paths = [
+  '''^node_modules/''',
+  '''^package-lock\.json$''',
+  '''^\.gitleaks\.toml$''',
+]

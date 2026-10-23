@@ -1,0 +1,195 @@
+name: Escaneo de vulnerabilidades
+
+# Pipeline de seguridad: se ejecuta en cada push y pull request sobre main.
+# Los trabajos de escaneo se ejecutan en paralelo; el despliegue a la nube
+# (Vercel) solo ocurre si TODOS los escaneos terminan sin hallazgos.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) Deteccion de secretos en el historial de Git
+  # ---------------------------------------------------------------------------
+  gitleaks:
+    name: 1) Secretos - Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Escanear el historial en busca de credenciales
+        # Subcomando "git" (el antiguo "detect" fue retirado en gitleaks v8).
+        # La ruta del repositorio se pasa como argumento posicional, no con --source.
+        run: |
+          mkdir -p reports
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:latest \
+            git /repo \
+            --config=/repo/.gitleaks.toml \
+            --report-format=sarif \
+            --report-path=/repo/reports/gitleaks.sarif \
+            --redact --no-banner --exit-code=1
+
+      - name: Publicar resultados en la pestana Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/gitleaks.sarif
+          category: gitleaks
+
+  # ---------------------------------------------------------------------------
+  # 2) Analisis estatico del codigo propio (SAST)
+  # ---------------------------------------------------------------------------
+  semgrep:
+    name: 2) SAST - Semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Analizar el codigo con los conjuntos de reglas de Semgrep
+        run: |
+          mkdir -p reports
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep:latest \
+            semgrep scan \
+            --config=p/default \
+            --config=p/owasp-top-ten \
+            --config=p/secrets \
+            --exclude=node_modules --exclude=reports \
+            --sarif --output=reports/semgrep.sarif \
+            --error --metrics=off --quiet
+
+      - name: Publicar resultados en la pestana Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/semgrep.sarif
+          category: semgrep
+
+  # ---------------------------------------------------------------------------
+  # 3) Dependencias, misconfiguraciones y secretos (SCA + IaC)
+  # ---------------------------------------------------------------------------
+  trivy:
+    name: 3) SCA - Trivy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cachear la base de datos de vulnerabilidades
+        uses: actions/cache@v4
+        with:
+          path: trivy-cache
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Escanear dependencias, configuracion y secretos
+        run: |
+          mkdir -p reports trivy-cache
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            -v "$PWD/trivy-cache:/root/.cache/" \
+            aquasec/trivy:latest fs \
+            --scanners=vuln,misconfig,secret \
+            --severity=MEDIUM,HIGH,CRITICAL \
+            --format=sarif \
+            --output=/src/reports/trivy.sarif \
+            --exit-code=1 --no-progress
+
+      - name: Publicar resultados en la pestana Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/trivy.sarif
+          category: trivy
+
+  # ---------------------------------------------------------------------------
+  # 4) Inventario de componentes (SBOM) y escaneo sobre el inventario
+  # ---------------------------------------------------------------------------
+  sbom-grype:
+    name: 4) SBOM - Syft + Grype
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias de produccion
+        run: npm ci --omit=dev
+
+      - name: Generar el SBOM en formato CycloneDX
+        run: |
+          mkdir -p reports
+          docker run --rm -v "$PWD:/src" anchore/syft:latest \
+            dir:/src \
+            -o cyclonedx-json=/src/reports/sbom.cdx.json \
+            -o table=reports/sbom-table.txt
+
+      - name: Escanear el SBOM con Grype
+        run: |
+          docker run --rm -v "$PWD:/src" anchore/grype:latest \
+            sbom:/src/reports/sbom.cdx.json \
+            -o table -o sarif=/src/reports/grype.sarif \
+            --fail-on high
+
+      - name: Publicar resultados en la pestana Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/grype.sarif
+          category: grype
+
+      - name: Adjuntar el SBOM como artefacto descargable
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: reports/sbom.cdx.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # 5) Pruebas automatizadas
+  # ---------------------------------------------------------------------------
+  pruebas:
+    name: 5) Pruebas automatizadas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm test
+
+  # ---------------------------------------------------------------------------
+  # 6) Despliegue continuo al proveedor SaaS (solo si todo lo anterior paso)
+  # ---------------------------------------------------------------------------
+  desplegar-vercel:
+    name: 6) Despliegue en Vercel
+    needs: [gitleaks, semgrep, trivy, sbom-grype, pruebas]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Desplegar en produccion
+        run: npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
